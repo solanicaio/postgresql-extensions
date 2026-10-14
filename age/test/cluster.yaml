@@ -1,0 +1,22 @@
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: ($values.name)
+spec:
+  imageName: ($values.pg_image)
+  instances: 1
+
+  # AGE refuses a pre-created ag_catalog, so let app use the schema the
+  # superuser creates later through the Database resource.
+  bootstrap:
+    initdb:
+      postInitApplicationSQL:
+        - ALTER DEFAULT PRIVILEGES FOR ROLE postgres GRANT USAGE ON SCHEMAS TO app
+
+  storage:
+    size: 1Gi
+
+  postgresql:
+    parameters: ($values.postgresql_parameters)
+    shared_preload_libraries: ($values.shared_preload_libraries)
+    extensions: ($values.extensions)

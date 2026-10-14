@@ -1,0 +1,553 @@
+// This dagger module provides maintenance utilities for CloudNativePG
+// Postgres extension container images tasks
+
+package main
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"fmt"
+	"maps"
+	"path"
+	"regexp"
+	"slices"
+	"sort"
+	"strconv"
+	"strings"
+	"text/template"
+	"time"
+
+	"go.yaml.in/yaml/v3"
+	"golang.org/x/text/cases"
+	"golang.org/x/text/language"
+
+	"dagger/maintenance/internal/dagger"
+)
+
+type Maintenance struct{}
+
+// Updates the OS dependencies in the system-libs directory for the specified extension(s)
+func (m *Maintenance) UpdateOSLibs(
+	ctx context.Context,
+	// The source directory containing the extension folders. Defaults to the current directory
+	// +ignore=["dagger", ".github"]
+	// +defaultPath="/"
+	source *dagger.Directory,
+	// The target extension to update OS libs for. Defaults to "all".
+	// +default="all"
+	target string,
+) (*dagger.Directory, error) {
+	extDir := source
+	if target != "all" {
+		extDir = source.Filter(dagger.DirectoryFilterOpts{
+			Include: []string{path.Join(target, "**")},
+		})
+		hasMetadataFile, err := extDir.Exists(ctx, path.Join(target, metadataFile))
+		if err != nil {
+			return nil, err
+		}
+		if !hasMetadataFile {
+			return nil, fmt.Errorf("not a valid target, metadata.hcl file is missing. Target: %s", target)
+		}
+	}
+
+	targetExtensions, err := getExtensions(ctx, extDir, WithOSLibsFilter())
+	if err != nil {
+		return source, err
+	}
+	if len(targetExtensions) == 0 && target != "all" {
+		return nil, fmt.Errorf("the target %q does not require OS Libs update", target)
+	}
+
+	const systemLibsDir = "system-libs"
+	includeDirs := make([]string, 0, len(targetExtensions))
+
+	for dir, extension := range targetExtensions {
+		targetDir := path.Join(dir, systemLibsDir)
+		includeDirs = append(includeDirs, targetDir)
+
+		matrix, err := parseBuildMatrix(ctx, source, dir)
+		if err != nil {
+			return nil, err
+		}
+
+		files := make([]*dagger.File, 0, len(matrix.Combinations))
+		for _, combo := range matrix.Combinations {
+			file, err := updateOSLibsOnTarget(
+				ctx,
+				extension,
+				combo.Distribution,
+				combo.MajorVersion,
+			)
+			if err != nil {
+				return source, err
+			}
+			files = append(files, file)
+		}
+		source = source.WithFiles(targetDir, files)
+	}
+
+	return source.Filter(dagger.DirectoryFilterOpts{
+		Include: includeDirs,
+	}), nil
+}
+
+// Retrieves a list in JSON format of the extensions requiring OS libs updates
+func (m *Maintenance) GetOSLibsTargets(
+	ctx context.Context,
+	// The source directory containing the extension folders. Defaults to the current directory
+	// +ignore=["dagger", ".github"]
+	// +defaultPath="/"
+	source *dagger.Directory,
+) (string, error) {
+	targetExtensions, err := getExtensions(ctx, source, WithOSLibsFilter())
+	if err != nil {
+		return "", err
+	}
+	jsonTargets, err := json.Marshal(slices.Sorted(maps.Keys(targetExtensions)))
+	if err != nil {
+		return "", err
+	}
+
+	return string(jsonTargets), nil
+}
+
+// Retrieves a list in JSON format of the extensions
+func (m *Maintenance) GetTargets(
+	ctx context.Context,
+	// The source directory containing the extension folders. Defaults to the current directory
+	// +ignore=["dagger", ".github"]
+	// +defaultPath="/"
+	source *dagger.Directory,
+) (string, error) {
+	targetExtensions, err := getExtensions(ctx, source)
+	if err != nil {
+		return "", err
+	}
+	jsonTargets, err := json.Marshal(slices.Sorted(maps.Keys(targetExtensions)))
+	if err != nil {
+		return "", err
+	}
+
+	return string(jsonTargets), nil
+}
+
+// Generates Chainsaw's testing external values in YAML format
+func (m *Maintenance) GenerateTestingValues(
+	ctx context.Context,
+	// The source directory containing the extension folders. Defaults to the current directory
+	// +ignore=["dagger", ".github"]
+	// +defaultPath="/"
+	source *dagger.Directory,
+	// The target extension to generate values for
+	target string,
+	// URL reference to the extension image to test [REPOSITORY[:TAG]]
+	// +optional
+	extensionImage string,
+	// Registry username for authentication (optional)
+	// +optional
+	registryUsername string,
+	// Registry password or token for authentication (optional)
+	// +optional
+	registryPassword *dagger.Secret,
+) (*dagger.File, error) {
+	metadata, err := parseExtensionMetadata(ctx, source.Directory(target))
+	if err != nil {
+		return nil, err
+	}
+
+	targetExtensionImage := extensionImage
+	if targetExtensionImage == "" {
+		targetExtensionImage, err = getDefaultExtensionImage(metadata)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	annotations, err := getImageAnnotations(ctx, targetExtensionImage, registryUsername, registryPassword)
+	if err != nil {
+		return nil, err
+	}
+
+	pgImage := annotations[AnnotationImageBaseName]
+	if pgImage == "" {
+		return nil, fmt.Errorf(
+			"extension image %s doesn't have an %q annotation or its value is empty",
+			targetExtensionImage, AnnotationImageBaseName)
+	}
+
+	version := annotations[AnnotationImageSQLVersion]
+	if version == "" && metadata.CreateExtension {
+		return nil, fmt.Errorf(
+			"extension image %s doesn't have an %q annotation or its value is empty",
+			targetExtensionImage, AnnotationImageSQLVersion)
+	}
+
+	distribution, pgMajor, err := parseImageCoordinates(annotations)
+	if err != nil {
+		return nil, fmt.Errorf("extension image %s: %w", targetExtensionImage, err)
+	}
+
+	locator := imageLocator{
+		ExtensionImage: targetExtensionImage,
+		SQLVersion:     version,
+		Distribution:   distribution,
+		PgMajor:        pgMajor,
+	}
+
+	extensionInfos, err := generateTestingValuesExtensions(ctx, source, metadata, locator,
+		registryUsername, registryPassword)
+	if err != nil {
+		return nil, err
+	}
+
+	extensions := make([]*ExtensionConfiguration, len(extensionInfos))
+	for i, info := range extensionInfos {
+		extensions[i] = info.Configuration
+	}
+
+	databaseConfig := generateDatabaseConfig(extensionInfos)
+	databaseAssertStatus := generateDatabaseAssertStatus(extensionInfos)
+
+	// Build values.yaml content
+	values := TestingValues{
+		Name:                   metadata.Name,
+		SQLName:                metadata.SQLName,
+		SharedPreloadLibraries: metadata.SharedPreloadLibraries,
+		PostgresqlParameters:   metadata.PostgresqlParameters,
+		PgImage:                pgImage,
+		Version:                version,
+		CreateExtension:        metadata.CreateExtension,
+		Extensions:             extensions,
+		DatabaseConfig:         databaseConfig,
+		DatabaseAssertStatus:   databaseAssertStatus,
+	}
+	valuesYaml, err := yaml.Marshal(values)
+	if err != nil {
+		return nil, err
+	}
+
+	result := dag.File("values.yaml", string(valuesYaml))
+
+	return result, nil
+}
+
+// Scaffolds a new Postgres extension directory structure
+func (m *Maintenance) Create(
+	ctx context.Context,
+	// The source directory containing the extension template files
+	// +defaultPath="/templates"
+	templatesDir *dagger.Directory,
+	// The name of the extension
+	name string,
+	// The Postgres major versions the extension is supported for
+	// +default=["18"]
+	versions []string,
+	// The Debian distributions the extension is supported for
+	// +default=["trixie","bookworm"]
+	distros []string,
+	// The Debian package name for the extension. If the package name contains
+	// the postgres version, it can be templated using the "%version%" placeholder.
+	//  (default "postgresql-%version%-<name>")
+	// +optional
+	packageName string,
+) (*dagger.Directory, error) {
+	// Validate name parameter
+	if name == "" {
+		return nil, fmt.Errorf("name cannot be empty")
+	}
+	// Validate name contains only lowercase alphanumeric characters, hyphens, and underscores
+	validNamePattern := regexp.MustCompile(`^[a-z0-9_-]+$`)
+	if !validNamePattern.MatchString(name) {
+		return nil, fmt.Errorf(
+			"invalid extension name: %s (must contain only lowercase alphanumeric characters, hyphens, and underscores)",
+			name,
+		)
+	}
+
+	// Validate versions array is not empty
+	if len(versions) == 0 {
+		return nil, fmt.Errorf("versions array cannot be empty")
+	}
+
+	// Validate distros array is not empty
+	if len(distros) == 0 {
+		return nil, fmt.Errorf("distros array cannot be empty")
+	}
+
+	// Validate template files exist
+	var templateFiles = []string{
+		"metadata.hcl",
+		"Dockerfile",
+		"README.md",
+	}
+	for _, fileName := range templateFiles {
+		tmplFile := templatesDir.File(fileName + ".tmpl")
+		if _, err := tmplFile.Contents(ctx); err != nil {
+			return nil, fmt.Errorf("required template file %s.tmpl not found: %w", fileName, err)
+		}
+	}
+
+	extDir := dag.Directory()
+
+	type Extension struct {
+		Name           string
+		Versions       []string
+		Distros        []string
+		Package        string
+		DefaultVersion int
+		DefaultDistro  string
+	}
+
+	if packageName == "" {
+		packageName = "postgresql-%version%-" + name
+	}
+
+	extension := Extension{
+		Name:           name,
+		Versions:       versions,
+		Distros:        distros,
+		Package:        packageName,
+		DefaultVersion: DefaultPgMajor,
+		DefaultDistro:  DefaultDistribution,
+	}
+
+	toTitle := func(s string) string {
+		return cases.Title(language.English).String(s)
+	}
+
+	funcMap := template.FuncMap{
+		"replaceAll": strings.ReplaceAll,
+		"toTitle":    toTitle,
+	}
+
+	executeTemplate := func(fileName string) error {
+		tmplFile := templatesDir.File(fileName + ".tmpl")
+		tmplContent, err := tmplFile.Contents(ctx)
+		if err != nil {
+			return fmt.Errorf("failed to read template file %s.tmpl: %w", fileName, err)
+		}
+		tmpl, err := template.New(fileName).Funcs(funcMap).Parse(tmplContent)
+		if err != nil {
+			return fmt.Errorf("failed to parse template %s.tmpl: %w", fileName, err)
+		}
+		buf := &bytes.Buffer{}
+		if err := tmpl.Execute(buf, extension); err != nil {
+			return fmt.Errorf("failed to execute template %s.tmpl: %w", fileName, err)
+		}
+		extDir = extDir.WithNewFile(fileName, buf.String())
+		return nil
+	}
+
+	for _, fileName := range templateFiles {
+		if err := executeTemplate(fileName); err != nil {
+			return nil, err
+		}
+	}
+
+	return extDir, nil
+}
+
+// Tests the specified target using Chainsaw
+func (m *Maintenance) Test(
+	ctx context.Context,
+	// The source directory containing the extension folders. Defaults to the current directory
+	// +ignore=["dagger", ".github"]
+	// +defaultPath="/"
+	source *dagger.Directory,
+	// Kubeconfig to connect to the target K8s
+	// +required
+	kubeconfig *dagger.File,
+	// The target extension to test
+	// +default="all"
+	target string,
+	// Container image to use to run chainsaw
+	// renovate: datasource=docker depName=kyverno/chainsaw packageName=ghcr.io/kyverno/chainsaw versioning=docker
+	// +default="ghcr.io/kyverno/chainsaw:v0.2.15@sha256:527f3be2b9ec0580cb0bc84540a0fee99406b011c24ae3a30953e525af60809d"
+	chainsawImage string,
+	// Additional arguments to pass to Chainsaw test command
+	// +optional
+	extraArgs []string,
+) error {
+	extDir := source
+	if target != "all" {
+		extDir = source.Filter(dagger.DirectoryFilterOpts{
+			Include: []string{path.Join(target, "**"), "test"},
+		})
+		hasMetadataFile, err := extDir.Exists(ctx, path.Join(target, metadataFile))
+		if err != nil {
+			return err
+		}
+		if !hasMetadataFile {
+			return fmt.Errorf("not a valid target, metadata.hcl file is missing. Target: %s", target)
+		}
+	}
+
+	targetExtensions, err := extensionsDirectories(ctx, extDir)
+	if err != nil {
+		return err
+	}
+
+	const valuesFile = "values.yaml"
+
+	for _, targetExtension := range targetExtensions {
+		extName, err := targetExtension.Name(ctx)
+		if err != nil {
+			return err
+		}
+
+		hasValues, err := targetExtension.Exists(ctx, valuesFile)
+		if err != nil {
+			return err
+		}
+		if !hasValues {
+			return fmt.Errorf("cannot execute tests for extension %q, values.yaml file is missing", target)
+		}
+
+		ctr := dag.Container().From(chainsawImage).
+			WithWorkdir("e2e").
+			WithEnvVariable("CACHEBUSTER", time.Now().String()).
+			WithDirectory("test", extDir.Directory("test")).
+			WithDirectory(extName, targetExtension).
+			WithFile("/etc/kubeconfig/config", kubeconfig).
+			WithEnvVariable("KUBECONFIG", "/etc/kubeconfig/config")
+
+		chainsawTestArgs := []string{
+			"test",
+			"./test",
+			"--values", path.Join(extName, valuesFile),
+		}
+		chainsawTestArgs = append(chainsawTestArgs, extraArgs...)
+
+		_, err = ctr.WithExec(
+			chainsawTestArgs,
+			dagger.ContainerWithExecOpts{
+				UseEntrypoint: true,
+			}).
+			Sync(ctx)
+
+		if err != nil {
+			return err
+		}
+
+		hasIndividualTests, err := targetExtension.Exists(ctx, "test")
+		if err != nil {
+			return err
+		}
+		if !hasIndividualTests {
+			continue
+		}
+
+		chainsawTestArgs = []string{
+			"test",
+			path.Join(extName, "test"),
+			"--values", path.Join(extName, valuesFile),
+		}
+		chainsawTestArgs = append(chainsawTestArgs, extraArgs...)
+
+		_, err = ctr.WithExec(
+			chainsawTestArgs,
+			dagger.ContainerWithExecOpts{
+				UseEntrypoint: true,
+			}).
+			Sync(ctx)
+		if err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+// Generate extension's ClusterImageCatalogs starting from a base set of catalogs
+func (m *Maintenance) GenerateCatalogs(
+	ctx context.Context,
+	// The source directory containing the extension folders. Defaults to the current directory
+	// +ignore=["dagger", ".github"]
+	// +defaultPath="/"
+	source *dagger.Directory,
+	// The directory containing the starting catalogs. Defaults to "/image-catalogs"
+	// +defaultPath="/image-catalogs"
+	catalogsDir *dagger.Directory,
+) (*dagger.Directory, error) {
+	outDir := dag.Directory()
+
+	catalogs, err := getMinimalCatalogs(ctx, catalogsDir)
+	if err != nil {
+		return nil, fmt.Errorf("while retrieving base catalogs: %w", err)
+	}
+
+	targetExtensions, err := getExtensions(ctx, source)
+	if err != nil {
+		return nil, fmt.Errorf("while retrieving extensions: %w", err)
+	}
+	if len(targetExtensions) == 0 {
+		return nil, fmt.Errorf("no extensions found in source directory")
+	}
+	if len(catalogs) == 0 {
+		return nil, fmt.Errorf("no catalogs matched the selection criteria")
+	}
+
+	metadataByDir := make(map[string]*extensionMetadata, len(targetExtensions))
+	for dir, extension := range targetExtensions {
+		metadata, err := parseExtensionMetadata(ctx, source.Directory(dir))
+		if err != nil {
+			return nil, fmt.Errorf("while parsing extension %s metadata: %w", extension, err)
+		}
+		metadataByDir[dir] = metadata
+	}
+
+	for _, catalog := range catalogs {
+		catalogOS, ok := catalog.Metadata.Labels[LabelImageOS]
+		if !ok {
+			return nil, fmt.Errorf("while retrieving OS for %q catalog", catalog.Metadata.Name)
+		}
+
+		for dir, extension := range targetExtensions {
+			metadata := metadataByDir[dir]
+			matrix := buildMatrixFromMetadata(metadata)
+			if !matrix.hasDistribution(catalogOS) {
+				continue
+			}
+
+			for i := range catalog.Spec.Images {
+				img := &catalog.Spec.Images[i]
+				if !matrix.contains(catalogOS, strconv.Itoa(img.Major)) {
+					continue
+				}
+
+				targetExtensionImage, err := getExtensionImageWithTimestamp(metadata, catalogOS, img.Major)
+				if err != nil {
+					return nil, fmt.Errorf("while retrieving extension %s image: %w", extension, err)
+				}
+
+				extensionsConfig := ExtensionConfiguration{
+					Name: metadata.Name,
+					ImageVolumeSource: ImageVolumeSource{
+						Reference: targetExtensionImage,
+					},
+					ExtensionControlPath: metadata.ExtensionControlPath,
+					DynamicLibraryPath:   metadata.DynamicLibraryPath,
+					LdLibraryPath:        metadata.LdLibraryPath,
+					BinPath:              metadata.BinPath,
+					Env:                  envMapToSlice(metadata.Env),
+				}
+
+				img.Extensions = append(img.Extensions, extensionsConfig)
+
+				// Sort extensions by name
+				sort.Slice(img.Extensions, func(i, j int) bool {
+					return img.Extensions[i].Name < img.Extensions[j].Name
+				})
+			}
+		}
+
+		outDir, err = writeCatalogToDir(catalog, outDir)
+		if err != nil {
+			return nil, fmt.Errorf("while writing catalog %s: %w", catalog.Metadata.Name, err)
+		}
+	}
+
+	return outDir, nil
+}

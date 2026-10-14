@@ -1,0 +1,49 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: extension-installed
+spec:
+  template:
+    spec:
+      restartPolicy: OnFailure
+      containers:
+      - name: data-test
+        env:
+          # Clear the image-baked PGSSLROOTCERT=system so libpq doesn't
+          # try to verify the CNPG self-signed CA against the OS trust store.
+          - name: PGSSLROOTCERT
+          - name: EXT_VERSION
+            value: ($values.version)
+          - name: DB_URI
+            valueFrom:
+              secretKeyRef:
+                name: (join('-', [$values.name, 'app']))
+                key: uri
+        # renovate: datasource=docker depName=alpine/psql versioning=docker
+        image: alpine/psql:18.6@sha256:08f354a83552fcefa508116268463b371717577fe49d3fcb7b82cf8d2be464b8
+        command: ['sh', '-c']
+        args:
+         - |
+           set -e
+           DB_URI=$(echo $DB_URI | sed "s|/\*|/|")
+           test "$(psql "$DB_URI" -tAqc "SELECT rolsuper FROM pg_roles WHERE rolname = current_user")" = "f"
+           test "$(psql "$DB_URI" -tAqc "SELECT EXISTS (SELECT FROM pg_catalog.pg_extension WHERE extname = 'age' AND extversion = '${EXT_VERSION}')")" = "t"
+           psql "$DB_URI" -q -v ON_ERROR_STOP=1 <<'SQL'
+           SET search_path = ag_catalog, "$user", public;
+           -- Job retries must start from a clean graph
+           DO $do$ BEGIN PERFORM drop_graph('test_graph', true); EXCEPTION WHEN invalid_schema_name THEN NULL; END $do$;
+           SELECT create_graph('test_graph');
+           -- Named dollar quotes: Kubernetes collapses "$$" to "$" in args
+           SELECT * FROM cypher('test_graph', $q$
+             CREATE (:Person {name: 'Alice'})-[:KNOWS]->(:Person {name: 'Bob'})
+           $q$) AS (v agtype);
+           SQL
+           FRIEND=$(psql "$DB_URI" -tAq -v ON_ERROR_STOP=1 <<'SQL'
+           SET search_path = ag_catalog, "$user", public;
+           SELECT friend FROM cypher('test_graph', $q$
+             MATCH (:Person {name: 'Alice'})-[:KNOWS]->(b:Person) RETURN b.name
+           $q$) AS (friend agtype);
+           SQL
+           )
+           test "$FRIEND" = '"Bob"'
+           echo "AGE graph created and queried as a non-superuser!"
