@@ -1,0 +1,52 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: extension-installed
+spec:
+  template:
+    spec:
+      restartPolicy: OnFailure
+      containers:
+      - name: data-test
+        env:
+          # Clear the image-baked PGSSLROOTCERT=system so libpq doesn't
+          # try to verify the CNPG self-signed CA against the OS trust store.
+          - name: PGSSLROOTCERT
+          - name: EXT_VERSION
+            value: ($values.version)
+          - name: DB_URI
+            valueFrom:
+              secretKeyRef:
+                name: (join('-', [$values.name, 'app']))
+                key: uri
+        # renovate: datasource=docker depName=alpine/psql versioning=docker
+        image: alpine/psql:18.6@sha256:08f354a83552fcefa508116268463b371717577fe49d3fcb7b82cf8d2be464b8
+        command: ['sh', '-c']
+        args:
+         - |
+           set -e
+           DB_URI=$(echo $DB_URI | sed "s|/\*|/|")
+           test "$(psql "$DB_URI" -tAqc "SELECT rolsuper FROM pg_roles WHERE rolname = current_user")" = "f"
+           test "$(psql "$DB_URI" -tAqc "SELECT EXISTS (SELECT FROM pg_catalog.pg_extension WHERE extname = 'timescaledb' AND extversion = '${EXT_VERSION}')")" = "t"
+           test "$(psql "$DB_URI" -tAqc "SHOW timescaledb.license")" = "timescale"
+           # Each statement below except the hypertable fails under the Apache-2.0 edition.
+           psql "$DB_URI" -q -v ON_ERROR_STOP=1 <<'SQL'
+           -- Job retries must start from a clean state
+           DROP MATERIALIZED VIEW IF EXISTS metrics_hourly;
+           DROP TABLE IF EXISTS metrics;
+           CREATE TABLE metrics (time timestamptz NOT NULL, device int NOT NULL, value double precision);
+           SELECT create_hypertable('metrics', by_range('time', INTERVAL '1 day'));
+           INSERT INTO metrics
+             SELECT t, d, random()
+             FROM generate_series(now() - INTERVAL '3 days', now(), INTERVAL '1 hour') t, generate_series(1, 3) d;
+           ALTER TABLE metrics SET (timescaledb.compress, timescaledb.compress_segmentby = 'device');
+           SELECT compress_chunk(c) FROM show_chunks('metrics', older_than => INTERVAL '1 day') c;
+           SELECT add_compression_policy('metrics', INTERVAL '7 days');
+           CREATE MATERIALIZED VIEW metrics_hourly WITH (timescaledb.continuous) AS
+             SELECT time_bucket(INTERVAL '1 hour', time) AS bucket, device, avg(value) AS avg_value
+             FROM metrics GROUP BY bucket, device WITH NO DATA;
+           CALL refresh_continuous_aggregate('metrics_hourly', NULL, NULL);
+           SQL
+           test "$(psql "$DB_URI" -tAqc "SELECT count(*) > 0 FROM timescaledb_information.chunks WHERE hypertable_name = 'metrics' AND is_compressed")" = "t"
+           test "$(psql "$DB_URI" -tAqc "SELECT count(*) > 0 FROM metrics_hourly")" = "t"
+           echo "Timescale License features work as a non-superuser!"

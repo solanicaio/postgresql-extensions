@@ -54,6 +54,43 @@
       "datasourceTemplate": "deb"
     },
     {
+      "description": "updates the Timescale repository deb package versions in the metadata.hcl files",
+      "customType": "regex",
+      "managerFilePatterns": [
+        "**/*.hcl"
+      ],
+      "matchStrings": [
+        "\\/\\/\\s*renovate:\\s*repo=timescale\\s+suite=(?<suite>\\S+)\\s+depName=(?<depName>\\S+)(?: extractVersion=(?<extractVersion>[^\\s]+?))?\\s*(sql|package)\\s*=\\s*\"(?<currentValue>.*)\""
+      ],
+      "registryUrlTemplate": "https://packagecloud.io/timescale/timescaledb/debian?suite={{suite}}&components=main&binaryArch=amd64",
+      "datasourceTemplate": "deb"
+    },
+    {
+      "description": "updates the Timescale repository container image versions in the README.md files",
+      "customType": "regex",
+      "managerFilePatterns": [
+        "**/README.md"
+      ],
+      "matchStrings": [
+        "#\\s*renovate:\\s*repo=timescale\\s+suite=(?<suite>\\S+)\\s+depName=(?<depName>\\S+)\\s*reference: ghcr.io\\/solanicaio\\/[A-Za-z0-9_-]+:(?<currentValue>([0-9]\\.?)+)"
+      ],
+      "registryUrlTemplate": "https://packagecloud.io/timescale/timescaledb/debian?suite={{suite}}&components=main&binaryArch=amd64",
+      "datasourceTemplate": "deb",
+      "extractVersionTemplate": "^(?<version>[^-+~]+)"
+    },
+    {
+      "description": "updates the Timescale repository container image SQL version in the README.md files",
+      "customType": "regex",
+      "managerFilePatterns": [
+        "**/README.md"
+      ],
+      "matchStrings": [
+        "#\\s*renovate:\\s*repo=timescale\\s+suite=(?<suite>\\S+)\\s+depName=(?<depName>\\S+)(?: extractVersion=(?<extractVersion>[^\\s]+?))?\\s*version: '(?<currentValue>([0-9]\\.?)+)'"
+      ],
+      "registryUrlTemplate": "https://packagecloud.io/timescale/timescaledb/debian?suite={{suite}}&components=main&binaryArch=amd64",
+      "datasourceTemplate": "deb"
+    },
+    {
       "description": "updates the Taskfile, test files and GitHub Actions workflow dependencies",
       "customType": "regex",
       "managerFilePatterns": [
