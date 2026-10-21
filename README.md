@@ -11,3 +11,10 @@ Images are published to `ghcr.io/solanicaio/<extension>:<version>-<pg major>-<di
 | Extension | Image | Docs |
 |-----------|-------|------|
 | [Apache AGE](https://age.apache.org/) | `ghcr.io/solanicaio/age` | [age/README.md](age/README.md) |
+| [TimescaleDB Community](https://github.com/timescale/timescaledb) ¹ | `ghcr.io/solanicaio/timescaledb` | [timescaledb/README.md](timescaledb/README.md) |
+
+¹ Includes components under the
+[Timescale License](https://github.com/timescale/timescaledb/blob/main/tsl/LICENSE-TIMESCALE),
+which is not open source and prohibits offering TimescaleDB to third parties
+as a database service. Use it only for internal use or if you hold a license
+from Timescale.
