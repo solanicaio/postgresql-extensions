@@ -1,0 +1,50 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: extension-installed
+spec:
+  template:
+    spec:
+      restartPolicy: OnFailure
+      # The PostgreSQL image provides psql and the libpq the client links against
+      securityContext:
+        runAsUser: 26
+        runAsNonRoot: true
+      containers:
+      - name: data-test
+        env:
+          - name: EXT_VERSION
+            value: ($values.version)
+          - name: DB_URI
+            valueFrom:
+              secretKeyRef:
+                name: (join('-', [$values.name, 'superuser']))
+                key: uri
+        image: ($values.pg_image)
+        command: ['sh', '-c']
+        args:
+         - |
+           set -e
+           DB_URI=$(echo $DB_URI | sed "s|/\*$|/app|")
+           test "$(psql "$DB_URI" -tAqc "SELECT EXISTS (SELECT FROM pg_catalog.pg_extension WHERE extname = 'pg_repack' AND extversion = '${EXT_VERSION}')")" = "t"
+           psql "$DB_URI" -q -v ON_ERROR_STOP=1 <<'SQL'
+           DROP TABLE IF EXISTS bloated;
+           CREATE TABLE bloated (id int PRIMARY KEY, payload text);
+           INSERT INTO bloated SELECT i, repeat('x', 200) FROM generate_series(1, 20000) i;
+           DELETE FROM bloated WHERE id % 2 = 0;
+           SQL
+           BEFORE=$(psql "$DB_URI" -tAqc "SELECT pg_relation_filenode('bloated') || ' ' || pg_relation_size('bloated')")
+           /pg-repack/bin/pg_repack --dbname="$DB_URI" --table=bloated
+           AFTER=$(psql "$DB_URI" -tAqc "SELECT pg_relation_filenode('bloated') || ' ' || pg_relation_size('bloated')")
+           echo "filenode and size before: $BEFORE, after: $AFTER"
+           test "${BEFORE% *}" != "${AFTER% *}"
+           test "${AFTER#* }" -lt "${BEFORE#* }"
+           test "$(psql "$DB_URI" -tAqc "SELECT count(*) FROM bloated")" = "10000"
+           echo "Table repacked with pg_repack!"
+        volumeMounts:
+        - name: pg-repack
+          mountPath: /pg-repack
+      volumes:
+      - name: pg-repack
+        image:
+          reference: ($values.extensions[0].image.reference)
