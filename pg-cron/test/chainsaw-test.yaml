@@ -1,0 +1,28 @@
+apiVersion: chainsaw.kyverno.io/v1alpha1
+kind: Test
+metadata:
+  name: verify-pg-cron-extension
+spec:
+  timeouts:
+    apply: 5s
+    assert: 3m
+    delete: 30s
+  description: Verify a non-superuser can schedule a pg_cron job that runs
+  steps:
+  - name: Create a Cluster with the extension
+    try:
+    - apply:
+        file: cluster.yaml
+    - apply:
+        file: database.yaml
+    - assert:
+        file: cluster-assert.yaml
+    - assert:
+        file: database-assert.yaml
+
+  - name: Verify a scheduled job runs as the application user
+    try:
+    - apply:
+        file: check-extension.yaml
+    - assert:
+        file: check-extension-assert.yaml

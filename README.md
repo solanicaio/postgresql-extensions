@@ -11,6 +11,8 @@ Images are published to `ghcr.io/solanicaio/<extension>:<version>-<pg major>-<di
 | Extension | Image | Docs |
 |-----------|-------|------|
 | [Apache AGE](https://age.apache.org/) | `ghcr.io/solanicaio/age` | [age/README.md](age/README.md) |
+| [pg_cron](https://github.com/citusdata/pg_cron) | `ghcr.io/solanicaio/pg-cron` | [pg-cron/README.md](pg-cron/README.md) |
+| [pg_repack](https://github.com/reorg/pg_repack) | `ghcr.io/solanicaio/pg-repack` | [pg-repack/README.md](pg-repack/README.md) |
 | [TimescaleDB Community](https://github.com/timescale/timescaledb) ¹ | `ghcr.io/solanicaio/timescaledb` | [timescaledb/README.md](timescaledb/README.md) |
 
 ¹ Includes components under the
