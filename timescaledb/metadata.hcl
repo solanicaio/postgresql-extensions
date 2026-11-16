@@ -25,6 +25,8 @@ metadata = {
         package = "2.31.0~debian13-1806"
         // renovate: repo=timescale suite=trixie depName=timescaledb-2-postgresql-18 extractVersion=^(?<version>\d+\.\d+\.\d+)
         sql = "2.31.0"
+        // ABI floor: PostgreSQL 18.7 changed the extension ABI (CVE-2026-6460)
+        min_pg_build_minor = 7
       }
     }
     bookworm = {
@@ -33,6 +35,8 @@ metadata = {
         package = "2.31.0~debian12-1806"
         // renovate: repo=timescale suite=bookworm depName=timescaledb-2-postgresql-18 extractVersion=^(?<version>\d+\.\d+\.\d+)
         sql = "2.31.0"
+        // ABI floor: PostgreSQL 18.7 changed the extension ABI (CVE-2026-6460)
+        min_pg_build_minor = 7
       }
     }
   }

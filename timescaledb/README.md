@@ -95,6 +95,15 @@ SHOW timescaledb.license;  -- timescale
 \dx
 ```
 
+## PostgreSQL ABI floor
+
+Timescale's package revision encodes the PostgreSQL release it was compiled
+against (`2.31.0~debian13-1806` was built against 18.6). Some PostgreSQL minor
+releases change the extension ABI (for example 18.7, CVE-2026-6460), and the
+server can't detect a stale build. `min_pg_build_minor` in `metadata.hcl`
+sets the oldest acceptable build minor; the image build fails for packages
+built against an older one. Raise it when a PostgreSQL minor breaks the ABI.
+
 ## Licenses and Copyright
 
 This container image contains software licensed under the Apache License 2.0
