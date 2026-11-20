@@ -130,12 +130,19 @@ jobs:
             arm64_digest=$(jq -r --arg target "$target" '.[ $target ]."containerimage.digest"' "$arm64")
             repository="${names%%,*}"
             repository="${repository%:*}"
+            annotation_args=()
+            while IFS=$'\t' read -r key value; do
+              annotation_args+=("--annotation" "index:${key}=${value}")
+            done < <(
+              docker buildx imagetools inspect "${repository}@${amd64_digest}" --raw |
+                jq -r '.annotations // {} | to_entries[] | [.key, .value] | @tsv'
+            )
             tag_args=()
             while IFS= read -r tag; do
               tag_args+=("-t" "$tag")
             done < <(tr ',' '\n' <<< "$names")
 
-            docker buildx imagetools create "${tag_args[@]}" \
+            docker buildx imagetools create "${annotation_args[@]}" "${tag_args[@]}" \
               "${repository}@${amd64_digest}" \
               "${repository}@${arm64_digest}"
 
