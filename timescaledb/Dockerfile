@@ -6,8 +6,24 @@ FROM $BASE AS builder
 
 ARG PG_MAJOR
 ARG EXT_VERSION
+ARG MIN_PG_BUILD_MINOR
 
 USER 0
+
+# Timescale's package revision encodes the PostgreSQL release it was compiled
+# against (e.g. 2.31.0~debian13-1806 -> 18.6). Refuse builds older than the
+# declared ABI floor: PostgreSQL minors occasionally break the extension ABI
+# (e.g. 18.7, CVE-2026-6460) and the server can't detect the mismatch.
+RUN if [ -n "${MIN_PG_BUILD_MINOR}" ]; then \
+      built="${EXT_VERSION##*-}" && \
+      built_major="${built%??}" && \
+      built_minor="${built#"${built_major}"}" && \
+      built_minor="${built_minor#0}" && \
+      if [ "${built_major}" != "${PG_MAJOR}" ] || [ "${built_minor}" -lt "${MIN_PG_BUILD_MINOR}" ]; then \
+        echo "ERROR: ${EXT_VERSION} was built against PostgreSQL ${built_major}.${built_minor}; need ${PG_MAJOR}.${MIN_PG_BUILD_MINOR} or newer (min_pg_build_minor)" >&2; \
+        exit 1; \
+      fi; \
+    fi
 
 # The community edition (with the Timescale License components) is only
 # published in Timescale's repository; PGDG ships the Apache-2.0 edition.

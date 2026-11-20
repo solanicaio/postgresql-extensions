@@ -50,6 +50,7 @@ target "default" {
     EXT_VERSION = "${getExtensionPackage(build.distro, build.pgVersion)}"
     PG_SERVER_DEV = "${getPgServerDevPackage(build.distro, build.pgVersion)}"
     BASE = "${getBaseImage(build.distro, build.pgVersion)}"
+    MIN_PG_BUILD_MINOR = "${getMinPgBuildMinor(build.distro, build.pgVersion)}"
   }
 
   output = [
@@ -147,6 +148,13 @@ function getPgVersion {
 function getPgServerDevPackage {
   params = [ distro, pgVersion ]
   result = lookup(metadata.versions[distro][pgVersion], "pg_server_dev", "")
+}
+
+// Lowest PostgreSQL minor the package must have been built against (ABI floor).
+// Empty when the extension doesn't declare one; the Dockerfile decides how to check it.
+function getMinPgBuildMinor {
+  params = [ distro, pgVersion ]
+  result = lookup(metadata.versions[distro][pgVersion], "min_pg_build_minor", "")
 }
 
 // Parse the packageVersion to extract the MM.mm.pp extension version.

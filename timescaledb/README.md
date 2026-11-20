@@ -98,6 +98,16 @@ The PostgreSQL 18.6 image is
 separate `2.32.1-18.7-trixie` build; the images must not be used across the
 18.6/18.7 boundary.
 
+## PostgreSQL ABI floor
+
+Timescale's package revision encodes the PostgreSQL release it was compiled
+against (`2.32.1~debian13-1806` was built against 18.6). Some PostgreSQL minor
+releases change the extension ABI (for example 18.7, CVE-2026-6460), and the
+server can't detect a stale build. Each version entry in `metadata.hcl` sets
+`min_pg_build_minor`, the oldest acceptable build minor (its own minor, e.g. 7
+for the 18.7 entry); the image build fails for packages built against an older
+one, so an 18.7 image can never ship an 18.6 build.
+
 ## Licenses and Copyright
 
 This container image contains software licensed under the Apache License 2.0
