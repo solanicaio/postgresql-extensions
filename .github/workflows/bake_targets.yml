@@ -15,16 +15,19 @@ permissions: {}
 
 jobs:
   testbuild:
-    name: Build ${{ inputs.extension_name }}
-    runs-on: ${{ github.repository_owner == 'cloudnative-pg' && 'ubuntu-latest-16-cores' || 'ubuntu-24.04' }}
+    name: Build ${{ inputs.extension_name }} (${{ matrix.arch }})
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-24.04
+          - arch: arm64
+            runner: ubuntu-24.04-arm
     permissions:
       contents: read
       packages: write
-      # Required by the cosign step
-      id-token: write
-    outputs:
-      metadata: ${{ steps.build.outputs.metadata }}
-      images: ${{ steps.images.outputs.images }}
     steps:
       - name: Checkout Code
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -38,15 +41,10 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1 # v4
-        with:
-          platforms: 'linux/arm64'
-
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4
 
-      - name: Build and push
+      - name: Build and push by digest
         uses: docker/bake-action@018cb6412ab401ebaa809aa5f85966b74628600f # v7
         id: build
         env:
@@ -57,24 +55,116 @@ jobs:
         with:
           files: ./docker-bake.hcl,./${{ inputs.extension_name }}/metadata.hcl
           push: true
+          set: |
+            *.platform=linux/${{ matrix.arch }}
+            *.output=type=image,oci-mediatypes=true,push-by-digest=true,name-canonical=true,push=true
 
-      # From bake's metadata, extract each unique tag (e.g. the ones with the timestamp)
+      - name: Save build metadata
+        env:
+          BUILD_METADATA: ${{ steps.build.outputs.metadata }}
+        run: |
+          printf '%s' "$BUILD_METADATA" > "metadata-${{ matrix.arch }}.json"
+
+      - name: Upload build metadata
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: ${{ inputs.extension_name }}-metadata-${{ matrix.arch }}
+          path: metadata-${{ matrix.arch }}.json
+          if-no-files-found: error
+          retention-days: 1
+
+  merge-images:
+    name: Merge ${{ inputs.extension_name }} images
+    runs-on: ubuntu-26.04
+    needs:
+      - testbuild
+    permissions:
+      packages: write
+      id-token: write
+    outputs:
+      metadata: ${{ steps.merge.outputs.metadata }}
+      images: ${{ steps.images.outputs.images }}
+    steps:
+      - name: Log in to the GitHub Container registry
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4
+
+      - name: Download build metadata
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c809b3 # v4.3.0
+        with:
+          pattern: ${{ inputs.extension_name }}-metadata-*
+          path: metadata
+          merge-multiple: true
+
+      - name: Create multi-arch manifests
+        id: merge
+        run: |
+          amd64="metadata/metadata-amd64.json"
+          arm64="metadata/metadata-arm64.json"
+          test -s "$amd64"
+          test -s "$arm64"
+          merged="[]"
+
+          for target in $(jq -r 'keys[]' "$amd64"); do
+            if ! jq -e --arg target "$target" 'has($target)' "$arm64" >/dev/null; then
+              echo "::error::Missing arm64 build target ${target}" >&2
+              exit 1
+            fi
+
+            names=$(jq -r --arg target "$target" '.[ $target ]."image.name"' "$amd64")
+            arm_names=$(jq -r --arg target "$target" '.[ $target ]."image.name"' "$arm64")
+            if [[ "$names" != "$arm_names" ]]; then
+              echo "::error::Architecture tag mismatch for ${target}" >&2
+              exit 1
+            fi
+
+            amd64_digest=$(jq -r --arg target "$target" '.[ $target ]."containerimage.digest"' "$amd64")
+            arm64_digest=$(jq -r --arg target "$target" '.[ $target ]."containerimage.digest"' "$arm64")
+            repository="${names%%,*}"
+            repository="${repository%:*}"
+            tag_args=()
+            while IFS= read -r tag; do
+              tag_args+=("-t" "$tag")
+            done < <(tr ',' '\n' <<< "$names")
+
+            docker buildx imagetools create "${tag_args[@]}" \
+              "${repository}@${amd64_digest}" \
+              "${repository}@${arm64_digest}"
+
+            timestamp_tag=$(tr ',' '\n' <<< "$names" | grep -E '[0-9]{12}-' | head -n1)
+            manifest_digest=$(docker buildx imagetools inspect "$timestamp_tag" |
+              awk '/^Digest:/ { print $2; exit }')
+            if [[ -z "$manifest_digest" ]]; then
+              echo "::error::Could not resolve digest for ${timestamp_tag}" >&2
+              exit 1
+            fi
+
+            merged=$(jq -c --arg target "$target" --arg names "$names" --arg digest "$manifest_digest" \
+              '. + [{key: $target, value: {"image.name": $names, "containerimage.digest": $digest}}]' <<< "$merged")
+          done
+
+          metadata=$(jq -c 'from_entries' <<< "$merged")
+          echo "metadata=$metadata" >> "$GITHUB_OUTPUT"
+
       - name: Generated images
         env:
-          BUILD_METADATA: ${{ steps.build.outputs.metadata }}
+          BUILD_METADATA: ${{ steps.merge.outputs.metadata }}
         id: images
         run: |
-          echo "images=$(jq -c '[ .[]."image.name" | split(",")[] | select(test("[0-9]{12}")) ]' <<< "$BUILD_METADATA")" >>  "$GITHUB_OUTPUT"
+          echo "images=$(jq -c '[ .[].\"image.name\" | split(\",\")[] | select(test(\"[0-9]{12}\")) ]' <<< "$BUILD_METADATA")" >> "$GITHUB_OUTPUT"
 
-      # Even if we're testing we sign the images, so we can push them to production later if that's required
       - name: Install cosign
         uses: sigstore/cosign-installer@756fe2d284c7292c4e9b62c8a28f1e5629c59532 # v4.1.3
-        # See https://github.blog/security/supply-chain-security/safeguard-container-signing-capability-actions/
-        # and https://github.com/actions/starter-workflows/blob/main/ci/docker-publish.yml for more details on
-        # how to use cosign.
+
       - name: Sign images
         env:
-          BUILD_METADATA: ${{ steps.build.outputs.metadata }}
+          BUILD_METADATA: ${{ steps.merge.outputs.metadata }}
         run: |
           jq -r '.[] | (."image.name" | sub(",.*";"")) + "@" + ."containerimage.digest"' <<< "$BUILD_METADATA" | \
             xargs cosign sign --yes
@@ -87,11 +177,11 @@ jobs:
       packages: read
       security-events: write
     needs:
-      - testbuild
+      - merge-images
     strategy:
       fail-fast: false
       matrix:
-        image: ${{fromJson(needs.testbuild.outputs.images)}}
+        image: ${{fromJson(needs.merge-images.outputs.images)}}
     steps:
       - name: Checkout Code
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -114,7 +204,6 @@ jobs:
     outputs:
       versions: ${{ steps.versions.outputs.versions }}
     steps:
-      # main plus the latest released patch of the latest and previous supported minors.
       - name: Compute CNPG release matrix
         id: versions
         env:
@@ -123,7 +212,6 @@ jobs:
         run: |
           LATEST_MINOR="${LATEST_RELEASE%.*}"
           PREVIOUS_MINOR=$(awk -F. '{print $1"."$2-1}' <<< "$LATEST_MINOR")
-          # Highest stable patch release of the previous minor
           PREVIOUS_RELEASE=$(git ls-remote --tags --refs https://github.com/cloudnative-pg/cloudnative-pg "refs/tags/v${PREVIOUS_MINOR}.*" \
             | sed 's|.*refs/tags/v||' \
             | grep -E "^${PREVIOUS_MINOR//./\\.}\.[0-9]+$" \
@@ -143,12 +231,12 @@ jobs:
       contents: read
       packages: read
     needs:
-      - testbuild
+      - merge-images
       - generate-smoke-test-matrix
     strategy:
       fail-fast: false
       matrix:
-        image: ${{fromJson(needs.testbuild.outputs.images)}}
+        image: ${{fromJson(needs.merge-images.outputs.images)}}
         cnpg: ${{fromJson(needs.generate-smoke-test-matrix.outputs.versions)}}
     steps:
       - name: Checkout Code
@@ -169,7 +257,6 @@ jobs:
       - name: Set up environment
         env:
           CNPG_RELEASE: ${{ matrix.cnpg }}
-          # Testing images are private ghcr packages, so kind nodes need pull credentials
           REGISTRY_USERNAME: ${{ github.actor }}
           REGISTRY_PASSWORD: ${{ secrets.GITHUB_TOKEN }}
         run: |
@@ -188,9 +275,7 @@ jobs:
         env:
           EXTENSION_NAME: ${{ inputs.extension_name }}
         run: |
-          # Get Kind cluster internal kubeconfig
           task e2e:export-kubeconfig KUBECONFIG_PATH=./kubeconfig INTERNAL=true
-
           task e2e:test TARGET="${EXTENSION_NAME}" KUBECONFIG_PATH="./kubeconfig"
 
   copytoproduction:
@@ -198,18 +283,17 @@ jobs:
     if: ${{ github.ref == 'refs/heads/main' }}
     runs-on: ubuntu-26.04
     needs:
-      - testbuild
+      - merge-images
       - security
       - smoke-test
     permissions:
       contents: read
       packages: write
-      # Required by the cosign step
       id-token: write
     steps:
       - name: Copy to production
         uses: cloudnative-pg/postgres-containers/.github/actions/copy-images@main
         with:
-          bake_build_metadata: "${{ needs.testbuild.outputs.metadata }}"
+          bake_build_metadata: "${{ needs.merge-images.outputs.metadata }}"
           registry_user: ${{ github.actor }}
           registry_token: ${{ secrets.GITHUB_TOKEN }}
