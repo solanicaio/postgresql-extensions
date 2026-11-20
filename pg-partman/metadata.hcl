@@ -31,12 +31,24 @@ metadata = {
         // renovate: suite=trixie-pgdg depName=postgresql-18-partman extractVersion=^(?<version>\d+\.\d+\.\d+)
         sql     = "5.5.0"
       }
+      "19" = {
+        // renovate: suite=trixie-pgdg depName=postgresql-19-partman
+        package = "5.5.0-1.pgdg13+2"
+        // renovate: suite=trixie-pgdg depName=postgresql-19-partman extractVersion=^(?<version>\d+\.\d+\.\d+)
+        sql     = "5.5.0"
+      }
     }
     bookworm = {
       "18" = {
         // renovate: suite=bookworm-pgdg depName=postgresql-18-partman
         package = "5.5.0-1.pgdg12+2"
         // renovate: suite=bookworm-pgdg depName=postgresql-18-partman extractVersion=^(?<version>\d+\.\d+\.\d+)
+        sql     = "5.5.0"
+      }
+      "19" = {
+        // renovate: suite=bookworm-pgdg depName=postgresql-19-partman
+        package = "5.5.0-1.pgdg12+2"
+        // renovate: suite=bookworm-pgdg depName=postgresql-19-partman extractVersion=^(?<version>\d+\.\d+\.\d+)
         sql     = "5.5.0"
       }
     }

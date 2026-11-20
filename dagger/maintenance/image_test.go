@@ -117,7 +117,7 @@ func TestExtractExtensionVersion(t *testing.T) {
 				},
 			}
 
-			got, err := extractExtensionVersion(versions, "bookworm", 18)
+			got, _, err := extractExtensionVersion(versions, "bookworm", 18)
 			if tt.wantErr {
 				if err == nil {
 					t.Fatal("expected an error, got nil")
@@ -131,5 +131,22 @@ func TestExtractExtensionVersion(t *testing.T) {
 				t.Errorf("version: got %q, want %q", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestExtractExtensionVersionSelectsLatestBuildVariant(t *testing.T) {
+	versions := versionMap{
+		"trixie": {
+			"18.6": {Package: "2.32.1", PGMajor: "18", PGVersion: "18.6"},
+			"18.7": {Package: "2.32.1", PGMajor: "18", PGVersion: "18.7"},
+		},
+	}
+
+	version, buildVersion, err := extractExtensionVersion(versions, "trixie", 18)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if version != "2.32.1" || buildVersion != "18.7" {
+		t.Fatalf("got version=%q build=%q, want 2.32.1/18.7", version, buildVersion)
 	}
 }

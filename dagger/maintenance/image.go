@@ -1,10 +1,12 @@
 package main
 
 import (
+	"cmp"
 	"bytes"
 	"context"
 	"fmt"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -112,13 +114,13 @@ func getDefaultExtensionImage(metadata *extensionMetadata) (string, error) {
 
 // getExtensionImage returns the extension image for a given distribution and pgMajor.
 func getExtensionImage(metadata *extensionMetadata, distribution string, pgMajor int) (string, error) {
-	version, err := extractExtensionVersion(metadata.Versions, distribution, pgMajor)
+	version, buildVersion, err := extractExtensionVersion(metadata.Versions, distribution, pgMajor)
 	if err != nil {
 		return "", fmt.Errorf("while extracting extension version for %s: %w", metadata.Name, err)
 	}
 
-	image := fmt.Sprintf("%s/%s:%s-%d-%s",
-		ExtensionsRegistry, metadata.ImageName, version, pgMajor, distribution)
+	image := fmt.Sprintf("%s/%s:%s-%s-%s",
+		ExtensionsRegistry, metadata.ImageName, version, buildVersion, distribution)
 
 	return image, nil
 }
@@ -132,15 +134,15 @@ func getExtensionImageWithTimestamp(metadata *extensionMetadata, distribution st
 		return "", fmt.Errorf("while listing tags for image %s: %w", imageName, err)
 	}
 
-	version, err := extractExtensionVersion(metadata.Versions, distribution, pgMajor)
+	version, buildVersion, err := extractExtensionVersion(metadata.Versions, distribution, pgMajor)
 	if err != nil {
 		return "", fmt.Errorf("while extracting extension version for %s: %w", metadata.Name, err)
 	}
 
 	re := regexp.MustCompile(
-		fmt.Sprintf(`^%s-(\d{12})-%d-%s$`,
+		fmt.Sprintf(`^%s-(\d{12})-%s-%s$`,
 			regexp.QuoteMeta(version),
-			pgMajor,
+			buildVersion,
 			distribution,
 		),
 	)
@@ -175,19 +177,48 @@ func getExtensionImageWithTimestamp(metadata *extensionMetadata, distribution st
 
 // extractExtensionVersion returns the extension version for a given distribution and pgMajor,
 // extracted from the extension's metadata.
-func extractExtensionVersion(versions versionMap, distribution string, pgMajor int) (string, error) {
-	extVersion, ok := versions[distribution][strconv.Itoa(pgMajor)]
+func extractExtensionVersion(versions versionMap, distribution string, pgMajor int) (string, string, error) {
+	major := strconv.Itoa(pgMajor)
+	extVersion, ok := versions[distribution][major]
 	if !ok {
-		return "", fmt.Errorf("no package version found for distribution %q and version %d",
-			distribution, pgMajor)
+		var buildVersions []string
+		for buildVersion, version := range versions[distribution] {
+			if version.PGMajor == major {
+				buildVersions = append(buildVersions, buildVersion)
+			}
+		}
+		slices.SortFunc(buildVersions, compareDottedVersions)
+		if len(buildVersions) == 0 {
+			return "", "", fmt.Errorf("no package version found for distribution %q and version %d",
+				distribution, pgMajor)
+		}
+
+		func compareDottedVersions(a, b string) int {
+			left, right := strings.Split(a, "."), strings.Split(b, ".")
+			for i := 0; i < max(len(left), len(right)); i++ {
+				var l, r int
+				if i < len(left) {
+					l, _ = strconv.Atoi(left[i])
+				}
+				if i < len(right) {
+					r, _ = strconv.Atoi(right[i])
+				}
+				if result := cmp.Compare(l, r); result != 0 {
+					return result
+				}
+			}
+			return 0
+		}
+		major = buildVersions[len(buildVersions)-1]
+		extVersion = versions[distribution][major]
 	}
 
 	// Keep this in sync with getExtensionVersion in docker-bake.hcl.
 	re := regexp.MustCompile(`^(\d+(?::\d+)?(?:\.\d+)*)`)
 	matches := re.FindStringSubmatch(extVersion.Package)
 	if len(matches) < 2 {
-		return "", fmt.Errorf("cannot extract extension version from %q", extVersion.Package)
+		return "", "", fmt.Errorf("cannot extract extension version from %q", extVersion.Package)
 	}
 
-	return strings.ReplaceAll(matches[1], ":", "-"), nil
+	return strings.ReplaceAll(matches[1], ":", "-"), major, nil
 }

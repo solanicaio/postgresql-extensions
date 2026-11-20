@@ -42,6 +42,8 @@ spec:
            ALTER TABLE metrics SET (timescaledb.compress, timescaledb.compress_segmentby = 'device');
            SELECT compress_chunk(c) FROM show_chunks('metrics', older_than => INTERVAL '1 day') c;
            SELECT add_compression_policy('metrics', INTERVAL '7 days');
+           SELECT run_job(job_id) FROM timescaledb_information.jobs
+             WHERE hypertable_name = 'metrics' AND proc_name = 'policy_compression';
            CREATE MATERIALIZED VIEW metrics_hourly WITH (timescaledb.continuous) AS
              SELECT time_bucket(INTERVAL '1 hour', time) AS bucket, device, avg(value) AS avg_value
              FROM metrics GROUP BY bucket, device WITH NO DATA;

@@ -23,7 +23,7 @@ retention and refresh policies.
 > Data).
 >
 > For the Apache-2.0 edition only, use
-> [`ghcr.io/cloudnative-pg/timescaledb-oss`](https://github.com/cloudnative-pg/postgres-extensions-containers/tree/main/timescaledb-oss).
+> [`timescaledb-oss`](../timescaledb-oss/README.md).
 
 The binaries come unmodified from Timescale's
 [package repository](https://packagecloud.io/timescale/timescaledb). Only the
@@ -44,7 +44,7 @@ kind: Cluster
 metadata:
   name: cluster-timescaledb
 spec:
-  imageName: ghcr.io/cloudnative-pg/postgresql:18-minimal-trixie
+  imageName: ghcr.io/cloudnative-pg/postgresql:18.7-minimal-trixie
   instances: 1
 
   storage:
@@ -60,8 +60,7 @@ spec:
     extensions:
     - name: timescaledb
       image:
-        # renovate: repo=timescale suite=trixie depName=timescaledb-2-postgresql-18
-        reference: ghcr.io/solanicaio/timescaledb:2.31.0-18-trixie
+        reference: ghcr.io/solanicaio/timescaledb:2.32.1-18.7-trixie
 ```
 
 ### 2. Enable the extension in a database
@@ -81,8 +80,7 @@ spec:
     name: cluster-timescaledb
   extensions:
   - name: timescaledb
-    # renovate: repo=timescale suite=trixie depName=timescaledb-2-postgresql-18 extractVersion=^(?<version>\d+\.\d+\.\d+)
-    version: '2.31.0'
+    version: '2.32.1'
 ```
 
 ### 3. Verify installation
@@ -94,6 +92,11 @@ Timescale License components are active:
 SHOW timescaledb.license;  -- timescale
 \dx
 ```
+
+The PostgreSQL 18.6 image is
+`ghcr.io/solanicaio/timescaledb:2.32.1-18.6-trixie`. PostgreSQL 18.7 uses the
+separate `2.32.1-18.7-trixie` build; the images must not be used across the
+18.6/18.7 boundary.
 
 ## Licenses and Copyright
 
