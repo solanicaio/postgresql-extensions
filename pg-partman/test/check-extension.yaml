@@ -1,0 +1,49 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: extension-installed
+spec:
+  template:
+    spec:
+      restartPolicy: OnFailure
+      containers:
+      - name: data-test
+        env:
+          # Clear the image-baked PGSSLROOTCERT=system so libpq doesn't
+          # try to verify the CNPG self-signed CA against the OS trust store.
+          - name: PGSSLROOTCERT
+          - name: EXT_VERSION
+            value: ($values.version)
+          - name: DB_URI
+            valueFrom:
+              secretKeyRef:
+                name: (join('-', [$values.name, 'app']))
+                key: uri
+        # renovate: datasource=docker depName=alpine/psql versioning=docker
+        image: alpine/psql:18.6@sha256:08f354a83552fcefa508116268463b371717577fe49d3fcb7b82cf8d2be464b8
+        command: ['sh', '-c']
+        args:
+         - |
+           set -e
+           DB_URI=$(echo $DB_URI | sed "s|/\*|/|")
+           test "$(psql "$DB_URI" -tAqc "SELECT rolsuper FROM pg_roles WHERE rolname = current_user")" = "f"
+           test "$(psql "$DB_URI" -tAqc "SELECT EXISTS (SELECT FROM pg_catalog.pg_extension e JOIN pg_catalog.pg_namespace n ON n.oid = e.extnamespace WHERE e.extname = 'pg_partman' AND e.extversion = '${EXT_VERSION}' AND n.nspname = 'partman')")" = "t"
+           psql "$DB_URI" -q -v ON_ERROR_STOP=1 <<'SQL'
+           CREATE TABLE IF NOT EXISTS events (id bigint NOT NULL, payload text) PARTITION BY RANGE (id);
+           SELECT partman.create_parent(p_parent_table := 'public.events', p_control := 'id', p_interval := '10', p_premake := 2)
+           WHERE NOT EXISTS (SELECT FROM partman.part_config WHERE parent_table = 'public.events');
+           SQL
+           PARTITIONS="SELECT count(*) FROM partman.show_partitions('public.events')"
+           BEFORE=$(psql "$DB_URI" -tAqc "$PARTITIONS")
+           # Rows in the last premade partition make maintenance create more
+           psql "$DB_URI" -q -v ON_ERROR_STOP=1 -c "INSERT INTO events SELECT g FROM generate_series(0, 25) g"
+           for i in $(seq 1 60); do
+             if [ "$(psql "$DB_URI" -tAqc "$PARTITIONS")" -gt "$BEFORE" ]; then break; fi
+             sleep 1
+           done
+           AFTER=$(psql "$DB_URI" -tAqc "$PARTITIONS")
+           echo "partitions before: $BEFORE, after: $AFTER"
+           test "$AFTER" -gt "$BEFORE"
+           test "$(psql "$DB_URI" -tAqc "SELECT count(*) FROM pg_tables WHERE schemaname = 'public' AND tablename LIKE 'events\_p%' AND tableowner <> current_user")" = "0"
+           test "$(psql "$DB_URI" -tAqc "SELECT count(*) FROM events")" = "26"
+           echo "Partitions premade by the pg_partman background worker as a non-superuser!"

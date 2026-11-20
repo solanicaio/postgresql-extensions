@@ -20,22 +20,42 @@ metadata = {
 
   versions = {
     trixie = {
-      "18" = {
+      "18.6" = {
+        pg_major     = "18"
+        pg_version   = "18.6"
         // renovate: repo=timescale suite=trixie depName=timescaledb-2-postgresql-18
-        package = "2.31.0~debian13-1806"
+        package = "2.32.1~debian13-1806"
         // renovate: repo=timescale suite=trixie depName=timescaledb-2-postgresql-18 extractVersion=^(?<version>\d+\.\d+\.\d+)
-        sql = "2.31.0"
-        // ABI floor: PostgreSQL 18.7 changed the extension ABI (CVE-2026-6460)
+        sql = "2.32.1"
+        // ABI guard: the package must be built against this entry's PostgreSQL minor
+        min_pg_build_minor = 6
+      }
+      "18.7" = {
+        pg_major     = "18"
+        pg_version   = "18.7"
+        package      = "2.32.1~debian13-1807"
+        sql          = "2.32.1"
+        // ABI guard: the package must be built against this entry's PostgreSQL minor
         min_pg_build_minor = 7
       }
     }
     bookworm = {
-      "18" = {
+      "18.6" = {
+        pg_major     = "18"
+        pg_version   = "18.6"
         // renovate: repo=timescale suite=bookworm depName=timescaledb-2-postgresql-18
-        package = "2.31.0~debian12-1806"
+        package = "2.32.1~debian12-1806"
         // renovate: repo=timescale suite=bookworm depName=timescaledb-2-postgresql-18 extractVersion=^(?<version>\d+\.\d+\.\d+)
-        sql = "2.31.0"
-        // ABI floor: PostgreSQL 18.7 changed the extension ABI (CVE-2026-6460)
+        sql = "2.32.1"
+        // ABI guard: the package must be built against this entry's PostgreSQL minor
+        min_pg_build_minor = 6
+      }
+      "18.7" = {
+        pg_major     = "18"
+        pg_version   = "18.7"
+        package      = "2.32.1~debian12-1807"
+        sql          = "2.32.1"
+        // ABI guard: the package must be built against this entry's PostgreSQL minor
         min_pg_build_minor = 7
       }
     }

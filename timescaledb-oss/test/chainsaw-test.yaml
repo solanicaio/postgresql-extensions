@@ -1,0 +1,20 @@
+apiVersion: chainsaw.kyverno.io/v1alpha1
+kind: Test
+metadata:
+  name: timescaledb-oss
+spec:
+  concurrent: false
+  steps:
+    - try:
+        - apply:
+            file: cluster.yaml
+        - assert:
+            file: cluster-assert.yaml
+        - apply:
+            file: database.yaml
+        - assert:
+            file: database-assert.yaml
+        - apply:
+            file: check-extension.yaml
+        - assert:
+            file: check-extension-assert.yaml

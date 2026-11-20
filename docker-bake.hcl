@@ -15,10 +15,15 @@ variable "revision" {
   default = ""
 }
 
+variable "architecture" {
+  default = ""
+}
+
 fullname = ( environment == "testing") ? "${registry}/${metadata.image_name}-testing" : "${registry}/${metadata.image_name}"
 now = timestamp()
 authors = "Solanica"
 url = "https://github.com/solanicaio/postgresql-extensions"
+architecture_suffix = architecture == "" ? "" : "-${architecture}"
 
 target "default" {
   matrix = {
@@ -35,13 +40,15 @@ target "default" {
   name = getBuildName(metadata.name, build.distro, build.pgVersion)
 
   tags = [
-    "${getImageName(fullname)}:${getExtensionVersion(build.distro, build.pgVersion)}-${build.pgVersion}-${build.distro}",
-    "${getImageName(fullname)}:${getExtensionVersion(build.distro, build.pgVersion)}-${formatdate("YYYYMMDDhhmm", now)}-${build.pgVersion}-${build.distro}",
+    "${getImageName(fullname)}:${getExtensionVersion(build.distro, build.pgVersion)}-${build.pgVersion}-${build.distro}${architecture_suffix}",
+    "${getImageName(fullname)}:${getExtensionVersion(build.distro, build.pgVersion)}-${formatdate("YYYYMMDDhhmm", now)}-${build.pgVersion}-${build.distro}${architecture_suffix}",
   ]
 
   args = {
-    PG_MAJOR = "${build.pgVersion}"
+    PG_MAJOR = "${getPgMajor(build.distro, build.pgVersion)}"
+    PG_VERSION = "${getPgVersion(build.distro, build.pgVersion)}"
     EXT_VERSION = "${getExtensionPackage(build.distro, build.pgVersion)}"
+    PG_SERVER_DEV = "${getPgServerDevPackage(build.distro, build.pgVersion)}"
     BASE = "${getBaseImage(build.distro, build.pgVersion)}"
     MIN_PG_BUILD_MINOR = "${getMinPgBuildMinor(build.distro, build.pgVersion)}"
   }
@@ -67,7 +74,7 @@ target "default" {
     "index,manifest:org.opencontainers.image.licenses=${join(" AND ", metadata.licenses)}",
     "index,manifest:org.opencontainers.image.base.name=scratch",
     "index,manifest:io.cloudnativepg.image.base.name=${getBaseImage(build.distro, build.pgVersion)}",
-    "index,manifest:io.cloudnativepg.image.base.pgmajor=${build.pgVersion}",
+    "index,manifest:io.cloudnativepg.image.base.pgmajor=${getPgMajor(build.distro, build.pgVersion)}",
     "index,manifest:io.cloudnativepg.image.base.os=${build.distro}",
     "index,manifest:io.cloudnativepg.image.sql.version=${getExtensionSqlVersion(build.distro, build.pgVersion)}",
   ]
@@ -85,7 +92,7 @@ target "default" {
     "org.opencontainers.image.licenses" = "${join(" AND ", metadata.licenses)}",
     "org.opencontainers.image.base.name" = "scratch",
     "io.cloudnativepg.image.base.name" = "${getBaseImage(build.distro, build.pgVersion)}",
-    "io.cloudnativepg.image.base.pgmajor" = "${build.pgVersion}",
+    "io.cloudnativepg.image.base.pgmajor" = "${getPgMajor(build.distro, build.pgVersion)}",
     "io.cloudnativepg.image.base.os" = "${build.distro}",
     "io.cloudnativepg.image.sql.version" = "${getExtensionSqlVersion(build.distro, build.pgVersion)}",
   }
@@ -98,7 +105,7 @@ function getImageName {
 
 function getBuildName {
   params = [ extName, distro, pgVersion ]
-  result = format("%s-%s-%s-%s", extName, sanitize(getExtensionVersion(distro, pgVersion)), pgVersion, distro)
+  result = format("%s-%s-%s-%s", extName, sanitize(getExtensionVersion(distro, pgVersion)), sanitize(pgVersion), distro)
 }
 
 // The build matrix is the explicit set of (distro, pgVersion) pairs declared
@@ -109,10 +116,11 @@ function getBuildMatrix {
   params = []
   result = flatten([
     for distro in keys(metadata.versions) : [
-      for pgVersion in keys(metadata.versions[distro]) : {
+      for pgVersion in keys(metadata.versions[distro]) :
+      {
         distro    = distro
         pgVersion = pgVersion
-      }
+      } if lookup(metadata.versions[distro][pgVersion], "build", true)
     ]
   ])
 }
@@ -125,6 +133,21 @@ function getExtensionPackage {
 function getExtensionSqlVersion {
   params = [ distro, pgVersion ]
   result = lookup(metadata.versions[distro][pgVersion], "sql", "")
+}
+
+function getPgMajor {
+  params = [ distro, pgVersion ]
+  result = lookup(metadata.versions[distro][pgVersion], "pg_major", pgVersion)
+}
+
+function getPgVersion {
+  params = [ distro, pgVersion ]
+  result = lookup(metadata.versions[distro][pgVersion], "pg_version", pgVersion)
+}
+
+function getPgServerDevPackage {
+  params = [ distro, pgVersion ]
+  result = lookup(metadata.versions[distro][pgVersion], "pg_server_dev", "")
 }
 
 // Lowest PostgreSQL minor the package must have been built against (ABI floor).
@@ -146,5 +169,5 @@ function getExtensionVersion {
 
 function getBaseImage {
   params = [ distro, pgVersion ]
-  result = format("ghcr.io/cloudnative-pg/postgresql:%s-minimal-%s", pgVersion, distro)
+  result = format("ghcr.io/cloudnative-pg/postgresql:%s-minimal-%s", getPgVersion(distro, pgVersion), distro)
 }

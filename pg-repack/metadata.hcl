@@ -20,16 +20,30 @@ metadata = {
     trixie = {
       "18" = {
         // renovate: suite=trixie-pgdg depName=postgresql-18-repack
-        package = "1.5.3-1.pgdg13+2"
+        package = "1.5.3-2.pgdg13+1"
         // renovate: suite=trixie-pgdg depName=postgresql-18-repack extractVersion=^(?<version>\d+\.\d+\.\d+)
+        sql     = "1.5.3"
+      }
+      "19" = {
+        build = false # Enable when the CloudNativePG PostgreSQL 19 operand image ships.
+        // renovate: suite=trixie-pgdg depName=postgresql-19-repack
+        package = "1.5.3-2.pgdg13+1"
+        // renovate: suite=trixie-pgdg depName=postgresql-19-repack extractVersion=^(?<version>\d+\.\d+\.\d+)
         sql     = "1.5.3"
       }
     }
     bookworm = {
       "18" = {
         // renovate: suite=bookworm-pgdg depName=postgresql-18-repack
-        package = "1.5.3-1.pgdg12+2"
+        package = "1.5.3-2.pgdg12+1"
         // renovate: suite=bookworm-pgdg depName=postgresql-18-repack extractVersion=^(?<version>\d+\.\d+\.\d+)
+        sql     = "1.5.3"
+      }
+      "19" = {
+        build = false # Enable when the CloudNativePG PostgreSQL 19 operand image ships.
+        // renovate: suite=bookworm-pgdg depName=postgresql-19-repack
+        package = "1.5.3-2.pgdg12+1"
+        // renovate: suite=bookworm-pgdg depName=postgresql-19-repack extractVersion=^(?<version>\d+\.\d+\.\d+)
         sql     = "1.5.3"
       }
     }
