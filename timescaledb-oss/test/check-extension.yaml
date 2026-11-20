@@ -36,9 +36,12 @@ spec:
                 UPDATE metrics SET value = value;
               END
               $$;
-              SELECT add_job('test_timescale_job', INTERVAL '1 hour', initial_start => now() + INTERVAL '1 hour');
-              SELECT run_job(job_id) FROM timescaledb_information.jobs
-              WHERE proc_schema = 'public' AND proc_name = 'test_timescale_job';
               SQL
+              job_id=$(psql "$DB_URI" -tAqc "SELECT add_job('test_timescale_job', INTERVAL '1 hour', initial_start => now())")
+              for _ in $(seq 1 45); do
+                test "$(psql "$DB_URI" -tAqc "SELECT last_run_status FROM timescaledb_information.job_stats WHERE job_id = ${job_id}")" = "Success" && break
+                sleep 2
+              done
+              test "$(psql "$DB_URI" -tAqc "SELECT last_run_status FROM timescaledb_information.job_stats WHERE job_id = ${job_id}")" = "Success"
               test "$(psql "$DB_URI" -tAqc "SELECT count(*) FROM metrics")" = "1"
               echo "TimescaleDB Apache-2.0 extension and background job work!"
