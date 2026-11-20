@@ -49,6 +49,7 @@ jobs:
         id: build
         env:
           BUILDX_METADATA_PROVENANCE: disabled
+          architecture: ${{ matrix.arch }}
           environment: testing
           registry: ghcr.io/${{ github.repository_owner }}
           revision: ${{ github.sha }}
@@ -57,7 +58,6 @@ jobs:
           push: true
           set: |
             *.platform=linux/${{ matrix.arch }}
-            *.output=type=image,oci-mediatypes=true,push-by-digest=true,name-canonical=true,push=true
 
       - name: Save build metadata
         env:
@@ -117,9 +117,11 @@ jobs:
               exit 1
             fi
 
-            names=$(jq -r --arg target "$target" '.[ $target ]."image.name"' "$amd64")
-            arm_names=$(jq -r --arg target "$target" '.[ $target ]."image.name"' "$arm64")
-            if [[ "$names" != "$arm_names" ]]; then
+            amd64_names=$(jq -r --arg target "$target" '.[ $target ]."image.name"' "$amd64")
+            arm64_names=$(jq -r --arg target "$target" '.[ $target ]."image.name"' "$arm64")
+            names=$(sed -E 's/-amd64([,]|$)/\1/g' <<< "$amd64_names")
+            expected_names=$(sed -E 's/-arm64([,]|$)/\1/g' <<< "$arm64_names")
+            if [[ "$names" != "$expected_names" ]]; then
               echo "::error::Architecture tag mismatch for ${target}" >&2
               exit 1
             fi

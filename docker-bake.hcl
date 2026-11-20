@@ -15,10 +15,15 @@ variable "revision" {
   default = ""
 }
 
+variable "architecture" {
+  default = ""
+}
+
 fullname = ( environment == "testing") ? "${registry}/${metadata.image_name}-testing" : "${registry}/${metadata.image_name}"
 now = timestamp()
 authors = "Solanica"
 url = "https://github.com/solanicaio/postgresql-extensions"
+architecture_suffix = architecture == "" ? "" : "-${architecture}"
 
 target "default" {
   matrix = {
@@ -35,8 +40,8 @@ target "default" {
   name = getBuildName(metadata.name, build.distro, build.pgVersion)
 
   tags = [
-    "${getImageName(fullname)}:${getExtensionVersion(build.distro, build.pgVersion)}-${build.pgVersion}-${build.distro}",
-    "${getImageName(fullname)}:${getExtensionVersion(build.distro, build.pgVersion)}-${formatdate("YYYYMMDDhhmm", now)}-${build.pgVersion}-${build.distro}",
+    "${getImageName(fullname)}:${getExtensionVersion(build.distro, build.pgVersion)}-${build.pgVersion}-${build.distro}${architecture_suffix}",
+    "${getImageName(fullname)}:${getExtensionVersion(build.distro, build.pgVersion)}-${formatdate("YYYYMMDDhhmm", now)}-${build.pgVersion}-${build.distro}${architecture_suffix}",
   ]
 
   args = {
