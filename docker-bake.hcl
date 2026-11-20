@@ -99,7 +99,7 @@ function getImageName {
 
 function getBuildName {
   params = [ extName, distro, pgVersion ]
-  result = format("%s-%s-%s-%s", extName, sanitize(getExtensionVersion(distro, pgVersion)), pgVersion, distro)
+  result = format("%s-%s-%s-%s", extName, sanitize(getExtensionVersion(distro, pgVersion)), sanitize(pgVersion), distro)
 }
 
 // The build matrix is the explicit set of (distro, pgVersion) pairs declared
@@ -110,10 +110,11 @@ function getBuildMatrix {
   params = []
   result = flatten([
     for distro in keys(metadata.versions) : [
-      for pgVersion in keys(metadata.versions[distro]) : {
+      for pgVersion in keys(metadata.versions[distro]) :
+      {
         distro    = distro
         pgVersion = pgVersion
-      }
+      } if lookup(metadata.versions[distro][pgVersion], "build", true)
     ]
   ])
 }

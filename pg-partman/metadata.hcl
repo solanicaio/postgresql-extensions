@@ -32,6 +32,7 @@ metadata = {
         sql     = "5.5.0"
       }
       "19" = {
+        build = false # Enable when the CloudNativePG PostgreSQL 19 operand image ships.
         // renovate: suite=trixie-pgdg depName=postgresql-19-partman
         package = "5.5.0-1.pgdg13+2"
         // renovate: suite=trixie-pgdg depName=postgresql-19-partman extractVersion=^(?<version>\d+\.\d+\.\d+)
@@ -46,6 +47,7 @@ metadata = {
         sql     = "5.5.0"
       }
       "19" = {
+        build = false # Enable when the CloudNativePG PostgreSQL 19 operand image ships.
         // renovate: suite=bookworm-pgdg depName=postgresql-19-partman
         package = "5.5.0-1.pgdg12+2"
         // renovate: suite=bookworm-pgdg depName=postgresql-19-partman extractVersion=^(?<version>\d+\.\d+\.\d+)

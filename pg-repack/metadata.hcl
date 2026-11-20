@@ -25,6 +25,7 @@ metadata = {
         sql     = "1.5.3"
       }
       "19" = {
+        build = false # Enable when the CloudNativePG PostgreSQL 19 operand image ships.
         // renovate: suite=trixie-pgdg depName=postgresql-19-repack
         package = "1.5.3-2.pgdg13+1"
         // renovate: suite=trixie-pgdg depName=postgresql-19-repack extractVersion=^(?<version>\d+\.\d+\.\d+)
@@ -39,6 +40,7 @@ metadata = {
         sql     = "1.5.3"
       }
       "19" = {
+        build = false # Enable when the CloudNativePG PostgreSQL 19 operand image ships.
         // renovate: suite=bookworm-pgdg depName=postgresql-19-repack
         package = "1.5.3-2.pgdg12+1"
         // renovate: suite=bookworm-pgdg depName=postgresql-19-repack extractVersion=^(?<version>\d+\.\d+\.\d+)
