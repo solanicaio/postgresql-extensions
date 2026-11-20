@@ -159,7 +159,8 @@ jobs:
           BUILD_METADATA: ${{ steps.merge.outputs.metadata }}
         id: images
         run: |
-          echo "images=$(jq -c '[ .[].\"image.name\" | split(\",\")[] | select(test(\"[0-9]{12}\")) ]' <<< "$BUILD_METADATA")" >> "$GITHUB_OUTPUT"
+          images=$(jq -c '[ .[]."image.name" | split(",")[] | select(test("[0-9]{12}")) ]' <<< "$BUILD_METADATA")
+          echo "images=$images" >> "$GITHUB_OUTPUT"
 
       - name: Install cosign
         uses: sigstore/cosign-installer@756fe2d284c7292c4e9b62c8a28f1e5629c59532 # v4.1.3
