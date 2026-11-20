@@ -40,10 +40,7 @@ func (m *buildMatrix) contains(distribution, majorVersion string) bool {
 }
 
 type extensionVersion struct {
-	Package     string `hcl:"package" cty:"package"`
-	PGMajor     string `hcl:"pg_major,optional" cty:"pg_major"`
-	PGVersion   string `hcl:"pg_version,optional" cty:"pg_version"`
-	PGServerDev string `hcl:"pg_server_dev,optional" cty:"pg_server_dev"`
+	Package string `hcl:"package" cty:"package"`
 }
 
 type versionMap map[string]map[string]extensionVersion

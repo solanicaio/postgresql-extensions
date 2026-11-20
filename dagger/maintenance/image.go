@@ -182,8 +182,8 @@ func extractExtensionVersion(versions versionMap, distribution string, pgMajor i
 	extVersion, ok := versions[distribution][major]
 	if !ok {
 		var buildVersions []string
-		for buildVersion, version := range versions[distribution] {
-			if version.PGMajor == major {
+		for buildVersion := range versions[distribution] {
+			if strings.HasPrefix(buildVersion, major+".") {
 				buildVersions = append(buildVersions, buildVersion)
 			}
 		}

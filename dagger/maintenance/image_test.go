@@ -137,8 +137,8 @@ func TestExtractExtensionVersion(t *testing.T) {
 func TestExtractExtensionVersionSelectsLatestBuildVariant(t *testing.T) {
 	versions := versionMap{
 		"trixie": {
-			"18.6": {Package: "2.32.1", PGMajor: "18", PGVersion: "18.6"},
-			"18.7": {Package: "2.32.1", PGMajor: "18", PGVersion: "18.7"},
+			"18.6": {Package: "2.32.1"},
+			"18.7": {Package: "2.32.1"},
 		},
 	}
 
