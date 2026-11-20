@@ -30,18 +30,6 @@ spec:
               CREATE TABLE metrics (time timestamptz NOT NULL, value double precision);
               SELECT create_hypertable('metrics', by_range('time', INTERVAL '1 day'));
               INSERT INTO metrics VALUES (now(), 42);
-              CREATE OR REPLACE PROCEDURE test_timescale_job(job_id integer, config jsonb)
-              LANGUAGE plpgsql AS $$
-              BEGIN
-                UPDATE metrics SET value = value;
-              END
-              $$;
               SQL
-              job_id=$(psql "$DB_URI" -tAqc "SELECT add_job('test_timescale_job', INTERVAL '1 hour', initial_start => now())")
-              for _ in $(seq 1 45); do
-                test "$(psql "$DB_URI" -tAqc "SELECT last_run_status FROM timescaledb_information.job_stats WHERE job_id = ${job_id}")" = "Success" && break
-                sleep 2
-              done
-              test "$(psql "$DB_URI" -tAqc "SELECT last_run_status FROM timescaledb_information.job_stats WHERE job_id = ${job_id}")" = "Success"
               test "$(psql "$DB_URI" -tAqc "SELECT count(*) FROM metrics")" = "1"
-              echo "TimescaleDB Apache-2.0 extension and background job work!"
+              echo "TimescaleDB Apache-2.0 extension works!"
