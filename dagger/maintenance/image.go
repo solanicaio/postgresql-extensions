@@ -1,8 +1,8 @@
 package main
 
 import (
-	"cmp"
 	"bytes"
+	"cmp"
 	"context"
 	"fmt"
 	"regexp"
@@ -193,22 +193,6 @@ func extractExtensionVersion(versions versionMap, distribution string, pgMajor i
 				distribution, pgMajor)
 		}
 
-		func compareDottedVersions(a, b string) int {
-			left, right := strings.Split(a, "."), strings.Split(b, ".")
-			for i := 0; i < max(len(left), len(right)); i++ {
-				var l, r int
-				if i < len(left) {
-					l, _ = strconv.Atoi(left[i])
-				}
-				if i < len(right) {
-					r, _ = strconv.Atoi(right[i])
-				}
-				if result := cmp.Compare(l, r); result != 0 {
-					return result
-				}
-			}
-			return 0
-		}
 		major = buildVersions[len(buildVersions)-1]
 		extVersion = versions[distribution][major]
 	}
@@ -221,4 +205,21 @@ func extractExtensionVersion(versions versionMap, distribution string, pgMajor i
 	}
 
 	return strings.ReplaceAll(matches[1], ":", "-"), major, nil
+}
+
+func compareDottedVersions(a, b string) int {
+	left, right := strings.Split(a, "."), strings.Split(b, ".")
+	for i := 0; i < max(len(left), len(right)); i++ {
+		var l, r int
+		if i < len(left) {
+			l, _ = strconv.Atoi(left[i])
+		}
+		if i < len(right) {
+			r, _ = strconv.Atoi(right[i])
+		}
+		if result := cmp.Compare(l, r); result != 0 {
+			return result
+		}
+	}
+	return 0
 }
