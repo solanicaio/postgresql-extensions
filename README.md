@@ -6,7 +6,9 @@ layout and are built with the same tooling as
 [cloudnative-pg/postgres-extensions-containers](https://github.com/cloudnative-pg/postgres-extensions-containers)
 (see [BUILD.md](BUILD.md)), so extensions can be proposed upstream unchanged.
 
-Images are published to `ghcr.io/solanicaio/<extension>:<version>-<pg major>-<distro>`.
+Images are published to `ghcr.io/solanicaio/<extension>:<version>-<pg version>-<distro>`.
+ABI-sensitive extensions can use a PostgreSQL minor release in place of the
+major so multiple compatible builds coexist.
 
 | Extension | Image | Docs |
 |-----------|-------|------|
@@ -14,6 +16,7 @@ Images are published to `ghcr.io/solanicaio/<extension>:<version>-<pg major>-<di
 | [pg_cron](https://github.com/citusdata/pg_cron) | `ghcr.io/solanicaio/pg-cron` | [pg-cron/README.md](pg-cron/README.md) |
 | [pg_partman](https://github.com/pgpartman/pg_partman) | `ghcr.io/solanicaio/pg-partman` | [pg-partman/README.md](pg-partman/README.md) |
 | [pg_repack](https://github.com/reorg/pg_repack) | `ghcr.io/solanicaio/pg-repack` | [pg-repack/README.md](pg-repack/README.md) |
+| [TimescaleDB Apache-2.0](https://github.com/timescale/timescaledb) | `ghcr.io/solanicaio/timescaledb-oss` | [timescaledb-oss/README.md](timescaledb-oss/README.md) |
 | [TimescaleDB Community](https://github.com/timescale/timescaledb) ¹ | `ghcr.io/solanicaio/timescaledb` | [timescaledb/README.md](timescaledb/README.md) |
 
 ¹ Includes components under the
