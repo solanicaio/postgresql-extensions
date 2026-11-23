@@ -37,13 +37,28 @@ RUN . /etc/os-release && \
       "timescaledb-2-postgresql-${PG_MAJOR}=${EXT_VERSION}" \
       "timescaledb-2-loader-postgresql-${PG_MAJOR}=${EXT_VERSION}"
 
+# Oldest release this repository has published. The loader loads the library of
+# the version installed in the database, so a newer image must still ship the
+# libraries of older published releases: without them every query fails until
+# ALTER EXTENSION timescaledb UPDATE runs.
+ARG UPGRADE_FROM_VERSION=2.31.0
+
 # The package keeps the libraries and install scripts of every past release;
-# ship only the loader, this release and the scripts that update to it.
+# ship the loader, the libraries since UPGRADE_FROM_VERSION, this release and
+# the scripts that update to it.
 RUN version="${EXT_VERSION%%~*}" && \
     lib="/usr/lib/postgresql/${PG_MAJOR}/lib" && \
     share="/usr/share/postgresql/${PG_MAJOR}/extension" && \
     mkdir -p /out/lib /out/share && \
-    cp "${lib}/timescaledb.so" "${lib}/timescaledb-${version}.so" "${lib}/timescaledb-tsl-${version}.so" /out/lib/ && \
+    cp "${lib}/timescaledb.so" /out/lib/ && \
+    for so in "${lib}"/timescaledb-[0-9]*.so; do \
+      v="${so##*/timescaledb-}" && v="${v%.so}" && \
+      if [ "$(printf '%s\n%s\n' "${UPGRADE_FROM_VERSION}" "${v}" | sort -V | head -n1)" = "${UPGRADE_FROM_VERSION}" ]; then \
+        cp "${so}" /out/lib/ && \
+        if [ -f "${lib}/timescaledb-tsl-${v}.so" ]; then cp "${lib}/timescaledb-tsl-${v}.so" /out/lib/; fi; \
+      fi; \
+    done && \
+    test -f "/out/lib/timescaledb-${version}.so" && test -f "/out/lib/timescaledb-tsl-${version}.so" && \
     cp "${share}/timescaledb.control" "${share}/timescaledb--${version}.sql" "${share}"/timescaledb--*--"${version}".sql /out/share/
 
 FROM scratch

@@ -108,6 +108,29 @@ server can't detect a stale build. Each version entry in `metadata.hcl` sets
 for the 18.7 entry); the image build fails for packages built against an older
 one, so an 18.7 image can never ship an 18.6 build.
 
+## Updating an existing database
+
+The TimescaleDB loader loads the library of the version installed in the
+database (`timescaledb-<version>.so`), so the image also ships the libraries of
+the releases published here before this one (since `UPGRADE_FROM_VERSION`,
+2.31.0). After switching a cluster to a newer image the database keeps running
+the installed version until the extension is updated. Timescale ships one build
+of these older libraries for every PostgreSQL minor, so they are not rebuilt for
+the image's minor: update promptly.
+
+TimescaleDB only accepts `ALTER EXTENSION timescaledb UPDATE` as the first
+statement of a session. The `Database` resource's declarative update runs it
+after another query, so it fails with `cannot be updated after the old version
+has already been loaded`
+([cloudnative-pg/cloudnative-pg#11987](https://github.com/cloudnative-pg/cloudnative-pg/issues/11987)).
+Until that is fixed, update it from a new `psql -X` session in every database
+that has the extension:
+
+```sh
+kubectl exec -n <namespace> <primary-pod> -c postgres -- \
+  psql -X -d app -c "ALTER EXTENSION timescaledb UPDATE"
+```
+
 ## Licenses and Copyright
 
 This container image contains software licensed under the Apache License 2.0
